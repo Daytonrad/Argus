@@ -1,0 +1,79 @@
+name: Verify help at 80x24
+on:
+  push:
+    branches: [verify/help-at-80x24]
+permissions:
+  contents: read
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ARGUS_OFFLINE: '1'
+      ARGUS_RUN_LIVE_TESTS: '0'
+      ARGUS_RUN_ANTIGRAVITY_TESTS: '0'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: hemang1404/Argus
+          ref: 69bc96bda17951d0b4e256143ca9d98942e7d100
+          persist-credentials: false
+      - name: Apply and verify the exact local patch tree
+        run: |
+          git apply --index --unidiff-zero <<'PATCH'
+          --- a/CHANGELOG.md
+          +++ b/CHANGELOG.md
+          @@ -9,0 +10 @@
+          +- The help dialog keeps its Close button visible on short terminals and shows the correct shortcuts for policy settings and the command palette.
+          --- a/README.md
+          +++ b/README.md
+          @@ -204,0 +205,2 @@
+          +Press `?` for the shortcut list. On the home screen, `Tab` opens policy settings.
+          +
+          --- a/argus-website/src/content/docs/interfaces/tui.mdx
+          +++ b/argus-website/src/content/docs/interfaces/tui.mdx
+          @@ -46 +46 @@
+          -| `?` | Help |
+          +| `?` | Open the scrollable shortcut list. Press `Esc` or click Close to return. |
+          --- a/argus/tui/modals/help.py
+          +++ b/argus/tui/modals/help.py
+          @@ -8 +8 @@
+          -from textual.containers import Container, Horizontal, Vertical
+          +from textual.containers import Container, Horizontal, Vertical, VerticalScroll
+          @@ -38 +38,2 @@
+          -            yield Static(self._build_table(), id="help-table")
+          +            with VerticalScroll():
+          +                yield Static(self._build_table(), id="help-table")
+          @@ -60 +61,2 @@
+          -        table.add_row(f"[bold {_BLUE}]Tab[/] / [bold {_BLUE}]Ctrl+P[/]", "Open slash-command palette modal")
+          +        table.add_row(f"[bold {_BLUE}]Tab[/]", "Open policy settings (Home)")
+          +        table.add_row(f"[bold {_BLUE}]Ctrl+P[/] / [bold {_BLUE}]Ctrl+K[/]", "Open command palette")
+          --- a/argus/tui/styles.tcss
+          +++ b/argus/tui/styles.tcss
+          @@ -1103 +1103 @@
+          -    height: auto;
+          +    height: 90%;
+          --- a/tests/test_tui_app.py
+          +++ b/tests/test_tui_app.py
+          @@ -452,0 +453,10 @@
+          +@pytest.mark.asyncio
+          +async def test_help_close_button_is_clickable_at_80x24(tmp_path):
+          +    app = ArgusTUIApp(workspace=str(tmp_path))
+          +    async with app.run_test(size=(80, 24)) as pilot:
+          +        app.open_help_modal()
+          +        await pilot.pause()
+          +        assert await pilot.click("#btn-help-close")
+          +        assert isinstance(app.screen, StartupScreen)
+          +
+          +
+          PATCH
+          test "$(git write-tree)" = 841a2ab8f1b3fd724ea0197d7de2692936d276f4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[dev,tui,gateway]'
+      - run: ruff check . && python -m compileall -q argus tests
+      - name: Run the 80x24 terminal regression
+        run: pytest -q tests/test_tui_app.py::test_help_close_button_is_clickable_at_80x24
+      - name: Run the complete offline suite
+        run: pytest -q -m 'not live_provider and not live_antigravity and not real_host and not tokenizer_download' --tb=short
